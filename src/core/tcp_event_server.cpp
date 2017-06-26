@@ -37,10 +37,10 @@ bool TcpEventServer::On(const char* name, ServerCbFunc func) {
         OnReceive = func;
         return true;
     }else if(strcasecmp(name, "Close") == 0){
-        OnReceive = func;
+        OnClose = func;
         return true;
     }else if(strcasecmp(name, "Connect") == 0){
-        OnReceive = func;
+        OnConnect = func;
         return true;
     }
     return false;
@@ -202,8 +202,8 @@ void TcpEventServer::CloseEventCb(struct bufferevent *bev, short events, void *d
     Conn *conn = (Conn *) data;
     //调用用户自定义的断开事件处理函数
     conn->m_Thread->tcpConnect->CloseEvent(conn, events);
-    conn->m_Thread->tcpConnect->DelConn(conn->GetFd());
     bufferevent_free(bev);
+    conn->m_Thread->tcpConnect->DelConn(conn->GetFd());
 }
 
 int TcpEventServer::Send(int fd, char *str) {

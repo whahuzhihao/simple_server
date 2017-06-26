@@ -90,26 +90,26 @@ PHP_METHOD(simple_server, on)
     }
     convert_to_string(zname);
     char *name = Z_STRVAL_P(zname);
+    if (check_callable(cb TSRMLS_CC) < 0)
+    {
+        return ;
+    }
     if(strcasecmp(name, "receive") == 0){
         zend_update_property(simple_server_class_entry_ptr, getThis(), ZEND_STRL("onReceive"), cb TSRMLS_CC);
         tcpEventServer->On("receive", simple_server_onreceive);
     }else if(strcasecmp(name, "connect") == 0){
         zend_update_property(simple_server_class_entry_ptr, getThis(), ZEND_STRL("onConnect"), cb TSRMLS_CC);
-        tcpEventServer->On("receive", simple_server_onconnect);
-    }else if(strcasecmp(name, "close")) {
+        tcpEventServer->On("connect", simple_server_onconnect);
+    }else if(strcasecmp(name, "close") == 0) {
         zend_update_property(simple_server_class_entry_ptr, getThis(), ZEND_STRL("onClose"), cb TSRMLS_CC);
-        tcpEventServer->On("receive", simple_server_onclose);
-    }
-
-    if (check_callable(cb TSRMLS_CC) < 0)
-    {
-        return ;
+        tcpEventServer->On("close", simple_server_onclose);
+    }else{
+        return;
     }
 }
 
 PHP_METHOD(simple_server, send)
 {
-
     zval* server_object = getThis();
     TcpEventServer *tcpEventServer = (TcpEventServer *)server_get_object(server_object);
 
@@ -143,7 +143,6 @@ static void simple_server_onreceive(Conn *conn){
     ZVAL_LONG(zfd, (long)conn->GetFd());
     ZVAL_LONG(zfrom_id, (long)conn->GetThread()->tid);
     char *tmp = conn->GetAllReadBuffer();
-    printf("%s", tmp);
     ZVAL_STRING(zdata, tmp, 1);
     efree(tmp);
 
