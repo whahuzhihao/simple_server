@@ -9,10 +9,29 @@
 #include <sstream>
 
 typedef void(*ServerCbFunc)(Conn *);
+
+typedef struct _DataHead
+{
+    int fd;  //文件描述符
+    uint16_t len;  //长度
+    int16_t from_id;  //Reactor Id
+    uint8_t type;  //类型
+    uint8_t from_fd;
+    uint16_t worker_id;
+} DataHead;
+
+typedef struct _EventData
+{
+    DataHead info;
+    char data[2048];
+}EventData;
+
 typedef struct _MsgBuff{
     long mtype;//消息类型
-    char data[512];//数据
+    char data[sizeof(EventData)];//数据
+//    char data[512];//数据
 }MsgBuff;
+
 
 class TcpEventServer
 {
@@ -30,6 +49,7 @@ private:
     pid_t m_MasterPid;
     pid_t m_ManagerPid;
     int m_MsgId;
+    bool m_IfMaster;
 public:
     static const int EXIT_CODE = -1;
 
@@ -69,6 +89,7 @@ private:
     }
 
     ServerCbFunc OnReceive;
+//    void (*OnReceive)(zval,int,int,char *);
     ServerCbFunc OnConnect;
     ServerCbFunc OnClose;
 
@@ -76,7 +97,7 @@ private:
 
     void WorkerProcessing();
 
-    int SendMsgQueue(const char* str, int len, long type);
+    int SendMsgQueue(const EventData* str, int len, long type);
     int ReceiveMsgQueue(MsgBuff &buff);
 protected:
     //新建连接成功后，会调用该函数
@@ -86,7 +107,15 @@ protected:
     void ReadEvent(Conn *conn) {
         int len = conn->GetReadBufferLen();
         const char *buf=conn->GetAllReadBuffer();
-        SendMsgQueue(buf, len+1, m_MasterPid);
+        DataHead head;
+        head.fd = conn->GetFd();
+        head.from_id = conn->GetThread()->tid;
+        EventData data;
+        data.info = head;
+        memcpy(data.data, buf, len+1);
+
+//        SendMsgQueue(buf, len+1, m_MasterPid);
+        SendMsgQueue(&data, sizeof(data), m_MasterPid);
     }
 
     //发送完成功后，会调用该函数（因为串包的问题，所以并不是每次发送完数据都会被调用）

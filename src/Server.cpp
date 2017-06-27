@@ -133,6 +133,7 @@ PHP_METHOD(simple_server, send)
 
 
 static void simple_server_onreceive(Conn *conn){
+//static void simple_server_onreceive(zval* object, int fd, int from_id, char* data){
     zval *zfd = NULL;
     zval *zfrom_id = NULL;
     zval *zdata = NULL;
@@ -143,11 +144,17 @@ static void simple_server_onreceive(Conn *conn){
     zval **args[4];
     zval *server_object = conn->GetThread()->tcpConnect->GetServerObject();
     args[0] = &server_object;
+//    args[0] = &object;
     ZVAL_LONG(zfd, (long)conn->GetFd());
     ZVAL_LONG(zfrom_id, (long)conn->GetThread()->tid);
     char *tmp = conn->GetAllReadBuffer();
     ZVAL_STRING(zdata, tmp, 1);
     efree(tmp);
+
+//    ZVAL_LONG(zfd, (long)fd);
+//    ZVAL_LONG(zfrom_id, (long)from_id);
+//    ZVAL_STRING(zdata, data, 1);
+
 
     args[1] = &zfd;
     args[2] = &zfrom_id;

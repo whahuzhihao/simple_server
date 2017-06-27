@@ -15,6 +15,7 @@ TcpEventServer::TcpEventServer(int port, int tcount, int wcount) {
     OnClose = NULL;
     OnReceive = NULL;
     OnConnect = NULL;
+    m_IfMaster = true;
 }
 
 TcpEventServer::~TcpEventServer() {
@@ -108,7 +109,7 @@ int TcpEventServer::InitProcessPool(){
     return 0;
 }
 
-int TcpEventServer::SendMsgQueue(const char* str, int len, long mtype){
+int TcpEventServer::SendMsgQueue(const EventData* str, int len, long mtype){
     MsgBuff msgbuff;
     memcpy(msgbuff.data, str, len);
     msgbuff.mtype = mtype;
@@ -120,11 +121,18 @@ int TcpEventServer::ReceiveMsgQueue(MsgBuff &msgbuf){
 }
 
 void TcpEventServer::WorkerProcessing(){
+    m_IfMaster = false;
     MsgBuff msgbuf;
     msgbuf.mtype = m_MasterPid;
     while(1){
         int ret = ReceiveMsgQueue(msgbuf);
         printf("%s\n", msgbuf.data);
+        EventData *data = (EventData *)&(msgbuf.data);
+        printf("%d %ld %s",data->info.fd,data->info.from_id,data->data);
+//        server_get_object(GetServerObject())->Send(data->info.fd, data->data);
+//        if(OnReceive){
+//            OnReceive();
+//        }
     }
 }
 
