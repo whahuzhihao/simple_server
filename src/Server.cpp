@@ -9,9 +9,10 @@ zend_class_entry *simple_server_class_entry_ptr;
 ZEND_BEGIN_ARG_INFO_EX(arginfo_simple_void, 0, 0, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_simple_server__construct, 0, 0, 2)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_simple_server__construct, 0, 0, 3)
                 ZEND_ARG_INFO(0, serv_port)
                 ZEND_ARG_INFO(0, serv_thread_num)
+                ZEND_ARG_INFO(0, serv_worker_num)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_simple_server_on, 0, 0, 2)
@@ -44,8 +45,9 @@ PHP_METHOD(simple_server, __construct)
 
     long serv_port = 2111;
     long thread_num = 2;
+    long worker_num = 2;
 
-    if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|ll", &serv_port,
+    if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|lll", &serv_port,
                                          &thread_num))
     {
         return;
@@ -56,9 +58,10 @@ PHP_METHOD(simple_server, __construct)
                               ZEND_STRL("port"), serv_port TSRMLS_CC);
     zend_update_property_long(simple_server_class_entry_ptr, server_object,
                               ZEND_STRL("threadNum"), thread_num TSRMLS_CC);
+    zend_update_property_long(simple_server_class_entry_ptr, server_object,
+                              ZEND_STRL("workerNum"), worker_num TSRMLS_CC);
 
-    TcpEventServer *tcpEventServer = new TcpEventServer(serv_port, thread_num);
-    tcpEventServer->SetPort(serv_port);
+    TcpEventServer *tcpEventServer = new TcpEventServer(serv_port, thread_num, worker_num);
     tcpEventServer->SetServerObject(getThis());
     server_set_object(server_object, tcpEventServer);
 }
@@ -237,6 +240,7 @@ void simple_server_init(int module_number TSRMLS_DC)
     simple_server_class_entry_ptr = zend_register_internal_class(&simple_server_ce TSRMLS_CC);
     zend_declare_property_long(simple_server_class_entry_ptr,ZEND_STRL("port"),-1,ZEND_ACC_PUBLIC TSRMLS_CC);
     zend_declare_property_long(simple_server_class_entry_ptr,ZEND_STRL("threadNum"),2,ZEND_ACC_PUBLIC TSRMLS_CC);
+    zend_declare_property_long(simple_server_class_entry_ptr,ZEND_STRL("workerNum"),2,ZEND_ACC_PUBLIC TSRMLS_CC);
 
     zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onReceive"),ZEND_ACC_PUBLIC TSRMLS_CC);
     zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onClose"),ZEND_ACC_PUBLIC TSRMLS_CC);

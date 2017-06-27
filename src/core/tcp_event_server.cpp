@@ -1,22 +1,20 @@
-#include "tcp_event_server.h"
+#include "../include/tcp_event_server.h"
+#include <sstream>
 
-TcpEventServer::TcpEventServer(int port, int count) {
+TcpEventServer::TcpEventServer(int port, int tcount, int wcount) {
     //初始化各项数据
-    m_ThreadCount = count;
+    m_ThreadCount = tcount;
+    m_WorkerCount = wcount;
     m_Port = port;
     m_MainBase = new ReactorThread;
     m_Threads = new ReactorThread[m_ThreadCount];
     m_MainBase->tid = pthread_self();
     m_MainBase->base = event_base_new();
+    pthread_mutex_init(&m_Lock,NULL);
 
     OnClose = NULL;
     OnReceive = NULL;
     OnConnect = NULL;
-    //初始化各个子线程的结构体
-    for (int i = 0; i < m_ThreadCount; i++) {
-        SetupThread(&m_Threads[i]);
-    }
-
 }
 
 TcpEventServer::~TcpEventServer() {
@@ -85,7 +83,63 @@ void *TcpEventServer::WorkerLibevent(void *arg) {
     printf("subthread done\n");
 }
 
+const char* i2s(int i)
+{
+    std::stringstream ss;
+    ss <<  i;
+    return ss.str().c_str();
+}
+
+int TcpEventServer::InitProcessPool(){
+    m_MasterPid = getpid();
+    printf("masterPid:%d\n",m_MasterPid);
+    key_t key = ftok(i2s(m_MasterPid), 'a');
+    //创建主进程跟子进程通信的消息队列
+    m_MsgId = msgget(key,  IPC_CREAT|0777);
+    printf("msgId:%d\n",m_MsgId);
+    for(int i=0;i<m_WorkerCount;i++){
+        pid_t pid = fork();
+        //子进程
+        if(pid == 0){
+            WorkerProcessing();
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int TcpEventServer::SendMsgQueue(const char* str, int len, long mtype){
+    MsgBuff msgbuff;
+    memcpy(msgbuff.data, str, len);
+    msgbuff.mtype = mtype;
+    return msgsnd(m_MsgId,  &msgbuff,  sizeof(msgbuff.data),  IPC_NOWAIT);
+}
+int TcpEventServer::ReceiveMsgQueue(MsgBuff &msgbuf){
+    memset(msgbuf.data,  '\0',  sizeof(msgbuf.data));
+    return msgrcv(m_MsgId,  &msgbuf,  sizeof(msgbuf.data), msgbuf.mtype,  0);
+}
+
+void TcpEventServer::WorkerProcessing(){
+    MsgBuff msgbuf;
+    msgbuf.mtype = m_MasterPid;
+    while(1){
+        int ret = ReceiveMsgQueue(msgbuf);
+        printf("%s\n", msgbuf.data);
+    }
+}
+
 bool TcpEventServer::StartRun() {
+    //初始化进程
+    if(InitProcessPool() == 1){
+        return true;
+    }
+
+    //初始化线程
+    //初始化各个子线程的结构体
+    for (int i = 0; i < m_ThreadCount; i++) {
+        SetupThread(&m_Threads[i]);
+    }
+
     evconnlistener *listener;
 
     //如果端口号不是EXIT_CODE，就监听该端口号

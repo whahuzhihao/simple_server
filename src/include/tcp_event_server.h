@@ -3,8 +3,16 @@
 
 #include "conn.h"
 #include "php.h"
+#include "sys/types.h"
+#include <sys/msg.h>
+#include <sys/ipc.h>
+#include <sstream>
 
 typedef void(*ServerCbFunc)(Conn *);
+typedef struct _MsgBuff{
+    long mtype;//消息类型
+    char data[512];//数据
+}MsgBuff;
 
 class TcpEventServer
 {
@@ -19,6 +27,9 @@ private:
     pthread_mutex_t m_Lock;               //connmap操作需要加线程互斥锁
     zval* m_ServerObject;                 //对应的php类 好蛋疼啊 指针存来存去
 
+    pid_t m_MasterPid;
+    pid_t m_ManagerPid;
+    int m_MsgId;
 public:
     static const int EXIT_CODE = -1;
 
@@ -61,12 +72,22 @@ private:
     ServerCbFunc OnConnect;
     ServerCbFunc OnClose;
 
+    int InitProcessPool();
+
+    void WorkerProcessing();
+
+    int SendMsgQueue(const char* str, int len, long type);
+    int ReceiveMsgQueue(MsgBuff &buff);
 protected:
     //新建连接成功后，会调用该函数
     void ConnectionEvent(Conn *conn) { if(OnConnect){ OnConnect(conn);} }
 
     //读取完数据后，会调用该函数
-    void ReadEvent(Conn *conn) { if(OnReceive){ OnReceive(conn); } }
+    void ReadEvent(Conn *conn) {
+        int len = conn->GetReadBufferLen();
+        const char *buf=conn->GetAllReadBuffer();
+        SendMsgQueue(buf, len+1, m_MasterPid);
+    }
 
     //发送完成功后，会调用该函数（因为串包的问题，所以并不是每次发送完数据都会被调用）
     void WriteEvent(Conn *conn) {  }
@@ -79,7 +100,7 @@ protected:
     void ErrorQuit(const char *str){};
 
 public:
-    TcpEventServer(int port, int count);
+    TcpEventServer(int port, int tcount, int wcount);
     ~TcpEventServer();
 
     //设置监听的端口号，如果不需要监听，请将其设置为EXIT_CODE
@@ -118,7 +139,5 @@ public:
 
     bool On(const char* name, ServerCbFunc cb);
 };
-
-
 
 #endif //SIMPLE_SERVER_TCP_EVENT_SERVER_H
