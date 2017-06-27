@@ -256,7 +256,7 @@ event *TcpEventServer::AddTimerEvent(void (*ptr)(int, short, void *),
     return ev;
 }
 
-bool TcpEventServer::DeleteTImerEvent(event *ev) {
+bool TcpEventServer::DeleteTimerEvent(event *ev) {
     int res = event_del(ev);
     return (0 == res);
 }
