@@ -48,7 +48,7 @@ PHP_METHOD(simple_server, __construct)
     long worker_num = 2;
 
     if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|lll", &serv_port,
-                                         &thread_num))
+                                         &thread_num, &worker_num))
     {
         return;
     }
