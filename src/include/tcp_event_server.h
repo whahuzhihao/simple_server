@@ -4,21 +4,30 @@
 #include "conn.h"
 #include "php.h"
 #include "sys/types.h"
+#include <sys/shm.h>
 #include <sys/msg.h>
 #include <sys/ipc.h>
 #include <sstream>
 
 typedef void(*ServerCbFunc)(Conn *);
 
+typedef enum _MsgType{
+    NEWCONN,
+    SENDTOWORKER,
+    SENDTOREACTOR
+}MsgType;
+
 typedef struct _DataHead
 {
     int fd;  //文件描述符
     uint16_t len;  //长度
-    int16_t from_id;  //Reactor Id
-    uint8_t type;  //类型
-    uint8_t from_fd;
-    uint16_t worker_id;
-} DataHead;
+    uint32_t from_id;  //Reactor Id
+//    uint8_t type;  //类型
+    MsgType type;  //类型
+    int pipefd; //接受管道id
+//    uint8_t from_fd;
+//    uint16_t worker_id;
+}DataHead;
 
 typedef struct _EventData
 {
@@ -49,13 +58,17 @@ private:
     pid_t m_MasterPid;
     pid_t m_ManagerPid;
     int m_MsgId;
+    int m_ShmId;
     bool m_IfMaster;
+
 public:
     static const int EXIT_CODE = -1;
 
 private:
     //初始化子线程的数据
     void SetupThread(ReactorThread *thread);
+    void InitThread(ReactorThread *thread);
+
 
     //子线程的入门函数
     static void *WorkerLibevent(void *arg);
@@ -94,7 +107,7 @@ private:
     ServerCbFunc OnClose;
 
     int InitProcessPool();
-
+    bool BeforeRun();
     void WorkerProcessing();
 
     int SendMsgQueue(const EventData* str, int len, long type);
@@ -106,16 +119,20 @@ protected:
     //读取完数据后，会调用该函数
     void ReadEvent(Conn *conn) {
         int len = conn->GetReadBufferLen();
-        const char *buf=conn->GetAllReadBuffer();
+        char *buf=conn->GetAllReadBuffer();
+        //构造消息
         DataHead head;
         head.fd = conn->GetFd();
-        head.from_id = conn->GetThread()->tid;
+        head.from_id = (uint32_t)conn->GetThread()->tid;
+        head.pipefd = conn->GetThread()->notifySendFd;
+        head.type = SENDTOWORKER;
+//        printf("send %u %d %d\n",head.from_id, head.pipefd, head.type);
         EventData data;
         data.info = head;
         memcpy(data.data, buf, len+1);
 
-//        SendMsgQueue(buf, len+1, m_MasterPid);
         SendMsgQueue(&data, sizeof(data), m_MasterPid);
+        efree(buf);
     }
 
     //发送完成功后，会调用该函数（因为串包的问题，所以并不是每次发送完数据都会被调用）

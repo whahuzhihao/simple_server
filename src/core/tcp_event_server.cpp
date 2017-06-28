@@ -6,11 +6,11 @@ TcpEventServer::TcpEventServer(int port, int tcount, int wcount) {
     m_ThreadCount = tcount;
     m_WorkerCount = wcount;
     m_Port = port;
+    m_MasterPid = getpid();
     m_MainBase = new ReactorThread;
-    m_Threads = new ReactorThread[m_ThreadCount];
+//    m_Threads = new ReactorThread[m_ThreadCount];
     m_MainBase->tid = pthread_self();
     m_MainBase->base = event_base_new();
-    pthread_mutex_init(&m_Lock,NULL);
 
     OnClose = NULL;
     OnReceive = NULL;
@@ -55,25 +55,26 @@ bool TcpEventServer::On(const char* name, ServerCbFunc func) {
 //}
 
 void TcpEventServer::SetupThread(ReactorThread *me) {
-    //建立libevent事件处理机制
-    me->tcpConnect = this;
+
     me->base = event_base_new();
     if (NULL == me->base)
         ErrorQuit("event base new error");
 
     //在主线程和子线程之间建立管道
-    int fds[2];
-    if (pipe(fds))
-        ErrorQuit("create pipe error");
-    me->notifyReceiveFd = fds[0];
-    me->notifySendFd = fds[1];
-
-    //让子线程的状态机监听管道
     event_set(&me->notifyEvent, me->notifyReceiveFd,
               EV_READ | EV_PERSIST, this->ThreadProcess, me);
     event_base_set(me->base, &me->notifyEvent);
     if (event_add(&me->notifyEvent, 0) == -1)
         ErrorQuit("Can't monitor libevent notify pipe\n");
+}
+
+void TcpEventServer::InitThread(ReactorThread* me){
+    me->tcpConnect = this;
+    int fds[2];
+    if (pipe(fds))
+        ErrorQuit("create pipe error");
+    me->notifyReceiveFd = fds[0];
+    me->notifySendFd = fds[1];
 }
 
 void *TcpEventServer::WorkerLibevent(void *arg) {
@@ -92,12 +93,6 @@ const char* i2s(int i)
 }
 
 int TcpEventServer::InitProcessPool(){
-    m_MasterPid = getpid();
-    printf("masterPid:%d\n",m_MasterPid);
-    key_t key = ftok(i2s(m_MasterPid), 'a');
-    //创建主进程跟子进程通信的消息队列
-    m_MsgId = msgget(key,  IPC_CREAT|0777);
-    printf("msgId:%d\n",m_MsgId);
     for(int i=0;i<m_WorkerCount;i++){
         pid_t pid = fork();
         //子进程
@@ -128,28 +123,64 @@ void TcpEventServer::WorkerProcessing(){
         int ret = ReceiveMsgQueue(msgbuf);
         printf("%s\n", msgbuf.data);
         EventData *data = (EventData *)&(msgbuf.data);
-        printf("%d %ld %s",data->info.fd,data->info.from_id,data->data);
+        printf("receive from reactor:%d |%d| %d| %u| %s",data->info.fd,data->info.type, data->info.pipefd,(unsigned int)data->info.from_id,data->data);
+        if(data->info.type == SENDTOWORKER){
+            printf("now send to reactor\n");
+            EventData tmp;
+            DataHead head;
+            head.type = SENDTOREACTOR;
+            tmp.info = head;
+            int res = write(m_Threads[0].notifySendFd, &tmp, sizeof tmp);
+            printf("send result:%d\n",res);
+        }
 //        server_get_object(GetServerObject())->Send(data->info.fd, data->data);
 //        if(OnReceive){
 //            OnReceive();
 //        }
+//        for(int i=0;i<m_ThreadCount;i++){
+//            if((uint32_t)m_Threads[i].tid == data->info.from_id){
+//                int r = m_Threads[i].tcpConnect->Send(data->info.fd, "abcdefg");
+//                printf("send result %d\n",r);
+//            }
+//        }
     }
 }
 
-bool TcpEventServer::StartRun() {
-    //初始化进程
-    if(InitProcessPool() == 1){
-        return true;
+bool TcpEventServer::BeforeRun(){
+    pthread_mutex_init(&m_Lock,NULL);
+    m_Threads = new ReactorThread[m_ThreadCount];
+    printf("masterPid:%d\n",m_MasterPid);
+    key_t key = ftok(i2s(m_MasterPid), 'a');
+    //创建主进程跟子进程通信的消息队列
+    m_MsgId = msgget(key,  IPC_CREAT|0777);
+    printf("msgQueueId:%d\n",m_MsgId);
+
+
+    //分配pipe 这里在fork子进程之前进行
+    for (int i = 0; i < m_ThreadCount; i++) {
+        InitThread(&m_Threads[i]);
     }
 
-    //初始化线程
+    //初始化进程
+    if(InitProcessPool() == 1){
+        return false;
+    }
+
     //初始化各个子线程的结构体
     for (int i = 0; i < m_ThreadCount; i++) {
         SetupThread(&m_Threads[i]);
     }
+    return true;
+}
 
+bool TcpEventServer::StartRun() {
+    //子进程不往下跑了
+    if(BeforeRun() == false){
+        return true;
+    }
+
+    //主线程开始监听tcp端口
     evconnlistener *listener;
-
     //如果端口号不是EXIT_CODE，就监听该端口号
     if (m_Port != EXIT_CODE) {
         sockaddr_in sin;
@@ -200,7 +231,13 @@ void TcpEventServer::ListenerEventCb(struct evconnlistener *listener,
     //随机选择一个子线程，通过管道向其传递socket描述符
     int num = rand() % server->m_ThreadCount;
     int sendfd = server->m_Threads[num].notifySendFd;
-    write(sendfd, &fd, sizeof(evutil_socket_t));
+    DataHead head;
+    head.fd = fd;
+    head.type = NEWCONN;
+    EventData data;
+    data.info = head;
+//    write(sendfd, &fd, sizeof(evutil_socket_t));
+    write(sendfd, &data, sizeof(data));
 }
 
 void TcpEventServer::ThreadProcess(int fd, short which, void *arg) {
@@ -209,35 +246,44 @@ void TcpEventServer::ThreadProcess(int fd, short which, void *arg) {
     //从管道中读取数据（socket的描述符或操作码）
     int pipefd = me->notifyReceiveFd;
     evutil_socket_t socketfd;
-    read(pipefd, &socketfd, sizeof(evutil_socket_t));
+    EventData data;
+//    read(pipefd, &socketfd, sizeof(evutil_socket_t));
+    read(pipefd, &data, sizeof(data));
+    //主线程分配来的新连接
+    if(data.info.type == NEWCONN){
+        socketfd = data.info.fd;
+        //如果操作码是EXIT_CODE，则终于事件循环
+        if (EXIT_CODE == socketfd) {
+            event_base_loopbreak(me->base);
+            return;
+        }
 
-    //如果操作码是EXIT_CODE，则终于事件循环
-    if (EXIT_CODE == socketfd) {
-        event_base_loopbreak(me->base);
-        return;
+        //新建连接
+        struct bufferevent *bev;
+        bev = bufferevent_socket_new(me->base, socketfd, BEV_OPT_CLOSE_ON_FREE);
+        if (!bev) {
+            fprintf(stderr, "Error constructing bufferevent!");
+            event_base_loopbreak(me->base);
+            return;
+        }
+
+        //将该链接放入队列
+        Conn *conn = new Conn(socketfd);
+        conn->m_Thread = me;
+        me->tcpConnect->AddConn(socketfd, conn);
+
+        //准备从socket中读写数据
+        bufferevent_setcb(bev, ReadEventCb, WriteEventCb, CloseEventCb, conn);
+        bufferevent_enable(bev, EV_WRITE | EV_PERSIST);
+        bufferevent_enable(bev, EV_READ | EV_PERSIST);
+
+        //调用用户自定义的连接事件处理函数
+        me->tcpConnect->ConnectionEvent(conn);
+    }else if(data.info.type == SENDTOREACTOR){
+        //接受worker进程发来的消息
+        printf("shoudao sendto reactor\n");
     }
 
-    //新建连接
-    struct bufferevent *bev;
-    bev = bufferevent_socket_new(me->base, socketfd, BEV_OPT_CLOSE_ON_FREE);
-    if (!bev) {
-        fprintf(stderr, "Error constructing bufferevent!");
-        event_base_loopbreak(me->base);
-        return;
-    }
-
-    //将该链接放入队列
-    Conn *conn = new Conn(socketfd);
-    conn->m_Thread = me;
-    me->tcpConnect->AddConn(socketfd, conn);
-
-    //准备从socket中读写数据
-    bufferevent_setcb(bev, ReadEventCb, WriteEventCb, CloseEventCb, conn);
-    bufferevent_enable(bev, EV_WRITE | EV_PERSIST);
-    bufferevent_enable(bev, EV_READ | EV_PERSIST);
-
-    //调用用户自定义的连接事件处理函数
-    me->tcpConnect->ConnectionEvent(conn);
 }
 
 void TcpEventServer::ReadEventCb(struct bufferevent *bev, void *data) {
@@ -269,10 +315,15 @@ void TcpEventServer::CloseEventCb(struct bufferevent *bev, short events, void *d
 }
 
 int TcpEventServer::Send(int fd, char *str) {
-    Conn *conn = GetConn(fd);
-    if(conn != NULL){
-        return conn->AddToWriteBuffer(str, strlen(str));
+    if(m_IfMaster){
+        Conn *conn = GetConn(fd);
+        if(conn != NULL){
+            return conn->AddToWriteBuffer(str, strlen(str));
+        }
+    }else{
+        //不是master
     }
+
     return 0;
 }
 

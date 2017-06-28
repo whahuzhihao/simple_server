@@ -30,6 +30,7 @@ class TcpEventServer;
 
 //每个子线程的线程信息
 struct ReactorThread {
+//    pthread_t tid;                //线程的ID
     pthread_t tid;                //线程的ID
     struct event_base *base;    //libevent的事件处理机
     struct event notifyEvent;    //监听管理的事件机
