@@ -122,7 +122,7 @@ void TcpEventServer::WorkerProcessing(){
     while(1){
         int ret = ReceiveMsgQueue(msgbuf);
         EventData *data = (EventData *)&(msgbuf.data);
-        printf("receive from reactor:%d |%d| %d| %u| %s",data->info.fd,data->info.type, data->info.pipefd,(unsigned int)data->info.from_id,data->data);
+//        printf("receive from reactor:%d |%d| %d| %u| %s",data->info.fd,data->info.type, data->info.pipefd,(unsigned int)data->info.from_id,data->data);
         if(data->info.type == SENDTOWORKER){
             m_FdPipeIdMap[data->info.fd] = data->info.pipefd;
             if(OnReceive){
@@ -204,7 +204,7 @@ bool TcpEventServer::StartRun() {
 
 void TcpEventServer::StopRun(timeval *tv) {
 //    int contant = EXIT_CODE;
-    WorkerData data;
+    EventData data;
     DataHead head;
     head.type = EXIT;
     data.info = head;
@@ -229,7 +229,7 @@ void TcpEventServer::ListenerEventCb(struct evconnlistener *listener,
     DataHead head;
     head.fd = fd;
     head.type = NEWCONN;
-    WorkerData data;
+    EventData data;
     data.info = head;
     write(sendfd, &data, sizeof(data));
 }
@@ -240,7 +240,7 @@ void TcpEventServer::ThreadProcess(int fd, short which, void *arg) {
     //从管道中读取数据（socket的描述符或操作码）
     int pipefd = me->notifyReceiveFd;
     evutil_socket_t socketfd;
-    WorkerData data;
+    EventData data;
 //    read(pipefd, &socketfd, sizeof(evutil_socket_t));
     read(pipefd, &data, sizeof(data));
     //主线程分配来的新连接
@@ -275,7 +275,6 @@ void TcpEventServer::ThreadProcess(int fd, short which, void *arg) {
         me->tcpConnect->ConnectionEvent(conn);
     }else if(data.info.type == SENDTOREACTOR){
         //接受worker进程发来的消息
-        printf("shoudao sendto reactor\n");
         me->tcpConnect->Send(data.info.fd, data.data);
     }else if(data.info.type == EXIT) {
         event_base_loopbreak(me->base);
@@ -316,18 +315,14 @@ int TcpEventServer::Send(int fd, char *str) {
         if(conn != NULL){
             return conn->AddToWriteBuffer(str, strlen(str));
         }
-    }else{
-        //不是master 其实就是给reactor发消息让他给客户端发
-        if(m_FdPipeIdMap.find(fd) != m_FdPipeIdMap.end()){
-            WorkerData tmp;
-            DataHead head;
-            head.type = SENDTOREACTOR;
-            head.fd = fd;
-            tmp.info = head;
-            tmp.data = str;
-            return write(m_FdPipeIdMap[fd], &tmp, sizeof tmp);
-        }
-        return 0;
+    }else if(m_FdPipeIdMap.find(fd) != m_FdPipeIdMap.end()){
+        EventData tmp;
+        DataHead head;
+        head.type = SENDTOREACTOR;
+        head.fd = fd;
+        tmp.info = head;
+        strcpy(tmp.data, str);
+        return write(m_FdPipeIdMap[fd], &tmp, sizeof tmp);
     }
     return 0;
 }

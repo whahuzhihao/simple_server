@@ -16,7 +16,6 @@ typedef struct _ServerCbParam{
 }ServerCbParam;
 
 typedef void(*ServerCbFunc)(ServerCbParam *param);
-//typedef void (*ServerCbFunc2)(zval *,int,int,char *);
 
 typedef enum _MsgType{
     NEWCONN,
@@ -43,16 +42,10 @@ typedef struct _EventData
     char data[2048];
 }EventData;
 
-typedef struct _WorkerData
-{
-    DataHead info;
-    char *data;
-}WorkerData;
 
 typedef struct _MsgBuff{
     long mtype;//消息类型
     char data[sizeof(EventData)];//数据
-//    char data[512];//数据
 }MsgBuff;
 
 
@@ -70,11 +63,9 @@ private:
     pthread_mutex_t m_Lock;               //connmap操作需要加线程互斥锁
     zval* m_ServerObject;                 //对应的php类 好蛋疼啊 指针存来存去
 
-    pid_t m_MasterPid;
-    pid_t m_ManagerPid;
-    int m_MsgId;
-    int m_ShmId;
-    bool m_IfMaster;
+    pid_t m_MasterPid;                  //master进程id
+    int m_MsgId;                        //消息队列id
+    bool m_IfMaster;                    //是否是master进程
 
 public:
     static const int EXIT_CODE = -1;
@@ -171,8 +162,6 @@ protected:
         }
     }
 
-    //发生致命错误（如果创建子线程失败等）后，会调用该函数
-    //该函数的默认操作是输出错误提示，终止程序
     void ErrorQuit(const char *str){};
 
 public:
