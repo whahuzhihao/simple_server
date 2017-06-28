@@ -131,9 +131,8 @@ PHP_METHOD(simple_server, send)
     tcpEventServer->Send(fd, data);
 }
 
-
-static void simple_server_onreceive(Conn *conn){
-//static void simple_server_onreceive(zval* object, int fd, int from_id, char* data){
+//static void simple_server_onreceive(Conn *conn){
+static void simple_server_onreceive(ServerCbParam *param){
     zval *zfd = NULL;
     zval *zfrom_id = NULL;
     zval *zdata = NULL;
@@ -142,25 +141,25 @@ static void simple_server_onreceive(Conn *conn){
     MAKE_STD_ZVAL(zdata);
 
     zval **args[4];
-    zval *server_object = conn->GetThread()->tcpConnect->GetServerObject();
-    args[0] = &server_object;
-//    args[0] = &object;
-    ZVAL_LONG(zfd, (long)conn->GetFd());
-    ZVAL_LONG(zfrom_id, (long)conn->GetThread()->tid);
-    char *tmp = conn->GetAllReadBuffer();
-    ZVAL_STRING(zdata, tmp, 1);
-    efree(tmp);
+//    zval *server_object = conn->GetThread()->tcpConnect->GetServerObject();
+//    args[0] = &server_object;
+    args[0] = &(param->object);
+//    ZVAL_LONG(zfd, (long)conn->GetFd());
+//    ZVAL_LONG(zfrom_id, (long)conn->GetThread()->tid);
+//    char *tmp = conn->GetAllReadBuffer();
+//    ZVAL_STRING(zdata, tmp, 1);
+//    efree(tmp);
 
-//    ZVAL_LONG(zfd, (long)fd);
-//    ZVAL_LONG(zfrom_id, (long)from_id);
-//    ZVAL_STRING(zdata, data, 1);
+    ZVAL_LONG(zfd, (long)param->fd);
+    ZVAL_LONG(zfrom_id, (long)param->from_id);
+    ZVAL_STRING(zdata, param->data, 1);
 
 
     args[1] = &zfd;
     args[2] = &zfrom_id;
     args[3] = &zdata;
     zval *retval = NULL;
-    zval *cb = zend_read_property(simple_server_class_entry_ptr, server_object, ZEND_STRL("onReceive"), 0 TSRMLS_CC);
+    zval *cb = zend_read_property(simple_server_class_entry_ptr, param->object, ZEND_STRL("onReceive"), 0 TSRMLS_CC);
     if (call_user_function_ex(EG(function_table), NULL, cb, &retval, 4, args, 0, NULL TSRMLS_CC) == FAILURE)
     {
 
@@ -178,17 +177,64 @@ static void simple_server_onreceive(Conn *conn){
     }
 }
 
-static void simple_server_onclose(Conn *conn){
+//static void simple_server_onreceive(Conn *conn){
+////static void simple_server_onreceive(zval* object, int fd, int from_id, char* data){
+//    zval *zfd = NULL;
+//    zval *zfrom_id = NULL;
+//    zval *zdata = NULL;
+//    MAKE_STD_ZVAL(zfd);
+//    MAKE_STD_ZVAL(zfrom_id);
+//    MAKE_STD_ZVAL(zdata);
+//
+//    zval **args[4];
+//    zval *server_object = conn->GetThread()->tcpConnect->GetServerObject();
+//    args[0] = &server_object;
+////    args[0] = &object;
+//    ZVAL_LONG(zfd, (long)conn->GetFd());
+//    ZVAL_LONG(zfrom_id, (long)conn->GetThread()->tid);
+//    char *tmp = conn->GetAllReadBuffer();
+//    ZVAL_STRING(zdata, tmp, 1);
+//    efree(tmp);
+//
+////    ZVAL_LONG(zfd, (long)fd);
+////    ZVAL_LONG(zfrom_id, (long)from_id);
+////    ZVAL_STRING(zdata, data, 1);
+//
+//
+//    args[1] = &zfd;
+//    args[2] = &zfrom_id;
+//    args[3] = &zdata;
+//    zval *retval = NULL;
+//    zval *cb = zend_read_property(simple_server_class_entry_ptr, server_object, ZEND_STRL("onReceive"), 0 TSRMLS_CC);
+//    if (call_user_function_ex(EG(function_table), NULL, cb, &retval, 4, args, 0, NULL TSRMLS_CC) == FAILURE)
+//    {
+//
+//    }
+//    if (EG(exception))
+//    {
+//        zend_exception_error(EG(exception), E_ERROR TSRMLS_CC);
+//    }
+//    zval_ptr_dtor(&zfd);
+//    zval_ptr_dtor(&zfrom_id);
+//    zval_ptr_dtor(&zdata);
+//    if (retval)
+//    {
+//        zval_ptr_dtor(&retval);
+//    }
+//}
+
+static void simple_server_onclose(ServerCbParam *param){
     zval *zfd = NULL;
     zval *zfrom_id = NULL;
     MAKE_STD_ZVAL(zfd);
     MAKE_STD_ZVAL(zfrom_id);
 
     zval **args[3];
-    zval *server_object = conn->GetThread()->tcpConnect->GetServerObject();
+//    zval *server_object = conn->GetThread()->tcpConnect->GetServerObject();
+    zval *server_object = param->object;
     args[0] = &server_object;
-    ZVAL_LONG(zfd, (long)conn->GetFd());
-    ZVAL_LONG(zfrom_id, (long)conn->GetThread()->tid);
+    ZVAL_LONG(zfd, param->fd);
+    ZVAL_LONG(zfrom_id, param->from_id);
     args[1] = &zfd;
     args[2] = &zfrom_id;
     zval *retval = NULL;
@@ -209,17 +255,18 @@ static void simple_server_onclose(Conn *conn){
     }
 }
 
-static void simple_server_onconnect(Conn *conn){
+static void simple_server_onconnect(ServerCbParam *param){
     zval *zfd = NULL;
     zval *zfrom_id = NULL;
     MAKE_STD_ZVAL(zfd);
     MAKE_STD_ZVAL(zfrom_id);
 
     zval **args[3];
-    zval *server_object = conn->GetThread()->tcpConnect->GetServerObject();
+//    zval *server_object = conn->GetThread()->tcpConnect->GetServerObject();
+    zval *server_object = param->object;
     args[0] = &server_object;
-    ZVAL_LONG(zfd, (long)conn->GetFd());
-    ZVAL_LONG(zfrom_id, (long)conn->GetThread()->tid);
+    ZVAL_LONG(zfd, param->fd);
+    ZVAL_LONG(zfrom_id, param->from_id);
     args[1] = &zfd;
     args[2] = &zfrom_id;
     zval *retval = NULL;
@@ -252,5 +299,4 @@ void simple_server_init(int module_number TSRMLS_DC)
     zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onReceive"),ZEND_ACC_PUBLIC TSRMLS_CC);
     zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onClose"),ZEND_ACC_PUBLIC TSRMLS_CC);
     zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onConnect"),ZEND_ACC_PUBLIC TSRMLS_CC);
-    zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("send"),ZEND_ACC_PUBLIC TSRMLS_CC);
 }

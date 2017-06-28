@@ -127,10 +127,9 @@ PHP_METHOD(simple_server, start);
 PHP_METHOD(simple_server, on);
 PHP_METHOD(simple_server, send);
 
-static void simple_server_onreceive(Conn *conn);
-//static void simple_server_onreceive(zval* object, int fd, int from_id, char* data);
-static void simple_server_onconnect(Conn *conn);
-static void simple_server_onclose(Conn *conn);
+static void simple_server_onreceive(ServerCbParam *param);
+static void simple_server_onconnect(ServerCbParam *param);
+static void simple_server_onclose(ServerCbParam *param);
 
 //----//
 

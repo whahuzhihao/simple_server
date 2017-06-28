@@ -121,28 +121,20 @@ void TcpEventServer::WorkerProcessing(){
     msgbuf.mtype = m_MasterPid;
     while(1){
         int ret = ReceiveMsgQueue(msgbuf);
-        printf("%s\n", msgbuf.data);
         EventData *data = (EventData *)&(msgbuf.data);
         printf("receive from reactor:%d |%d| %d| %u| %s",data->info.fd,data->info.type, data->info.pipefd,(unsigned int)data->info.from_id,data->data);
         if(data->info.type == SENDTOWORKER){
-            printf("now send to reactor\n");
-            EventData tmp;
-            DataHead head;
-            head.type = SENDTOREACTOR;
-            tmp.info = head;
-            int res = write(m_Threads[0].notifySendFd, &tmp, sizeof tmp);
-            printf("send result:%d\n",res);
+            m_FdPipeIdMap[data->info.fd] = data->info.pipefd;
+            if(OnReceive){
+                zval *object = (m_Threads[0].tcpConnect->GetServerObject());
+                ServerCbParam param;
+                param.from_id = data->info.from_id;
+                param.data = data->data;
+                param.fd = data->info.fd;
+                param.object = object;
+                OnReceive(&param);
+            }
         }
-//        server_get_object(GetServerObject())->Send(data->info.fd, data->data);
-//        if(OnReceive){
-//            OnReceive();
-//        }
-//        for(int i=0;i<m_ThreadCount;i++){
-//            if((uint32_t)m_Threads[i].tid == data->info.from_id){
-//                int r = m_Threads[i].tcpConnect->Send(data->info.fd, "abcdefg");
-//                printf("send result %d\n",r);
-//            }
-//        }
     }
 }
 
@@ -154,7 +146,6 @@ bool TcpEventServer::BeforeRun(){
     //创建主进程跟子进程通信的消息队列
     m_MsgId = msgget(key,  IPC_CREAT|0777);
     printf("msgQueueId:%d\n",m_MsgId);
-
 
     //分配pipe 这里在fork子进程之前进行
     for (int i = 0; i < m_ThreadCount; i++) {
@@ -212,12 +203,16 @@ bool TcpEventServer::StartRun() {
 }
 
 void TcpEventServer::StopRun(timeval *tv) {
-    int contant = EXIT_CODE;
+//    int contant = EXIT_CODE;
+    WorkerData data;
+    DataHead head;
+    head.type = EXIT;
+    data.info = head;
+
     //向各个子线程的管理中写入EXIT_CODE，通知它们退出
     for (int i = 0; i < m_ThreadCount; i++) {
-        write(m_Threads[i].notifySendFd, &contant, sizeof(int));
+        write(m_Threads[i].notifySendFd, &data, sizeof(data));
     }
-    //结果主线程的事件循环
     event_base_loopexit(m_MainBase->base, tv);
 }
 
@@ -234,9 +229,8 @@ void TcpEventServer::ListenerEventCb(struct evconnlistener *listener,
     DataHead head;
     head.fd = fd;
     head.type = NEWCONN;
-    EventData data;
+    WorkerData data;
     data.info = head;
-//    write(sendfd, &fd, sizeof(evutil_socket_t));
     write(sendfd, &data, sizeof(data));
 }
 
@@ -246,7 +240,7 @@ void TcpEventServer::ThreadProcess(int fd, short which, void *arg) {
     //从管道中读取数据（socket的描述符或操作码）
     int pipefd = me->notifyReceiveFd;
     evutil_socket_t socketfd;
-    EventData data;
+    WorkerData data;
 //    read(pipefd, &socketfd, sizeof(evutil_socket_t));
     read(pipefd, &data, sizeof(data));
     //主线程分配来的新连接
@@ -282,8 +276,10 @@ void TcpEventServer::ThreadProcess(int fd, short which, void *arg) {
     }else if(data.info.type == SENDTOREACTOR){
         //接受worker进程发来的消息
         printf("shoudao sendto reactor\n");
+        me->tcpConnect->Send(data.info.fd, data.data);
+    }else if(data.info.type == EXIT) {
+        event_base_loopbreak(me->base);
     }
-
 }
 
 void TcpEventServer::ReadEventCb(struct bufferevent *bev, void *data) {
@@ -321,9 +317,18 @@ int TcpEventServer::Send(int fd, char *str) {
             return conn->AddToWriteBuffer(str, strlen(str));
         }
     }else{
-        //不是master
+        //不是master 其实就是给reactor发消息让他给客户端发
+        if(m_FdPipeIdMap.find(fd) != m_FdPipeIdMap.end()){
+            WorkerData tmp;
+            DataHead head;
+            head.type = SENDTOREACTOR;
+            head.fd = fd;
+            tmp.info = head;
+            tmp.data = str;
+            return write(m_FdPipeIdMap[fd], &tmp, sizeof tmp);
+        }
+        return 0;
     }
-
     return 0;
 }
 

@@ -8,13 +8,21 @@
 #include <sys/msg.h>
 #include <sys/ipc.h>
 #include <sstream>
+typedef struct _ServerCbParam{
+    zval *object;
+    int fd;
+    int from_id;
+    char *data;
+}ServerCbParam;
 
-typedef void(*ServerCbFunc)(Conn *);
+typedef void(*ServerCbFunc)(ServerCbParam *param);
+//typedef void (*ServerCbFunc2)(zval *,int,int,char *);
 
 typedef enum _MsgType{
     NEWCONN,
     SENDTOWORKER,
-    SENDTOREACTOR
+    SENDTOREACTOR,
+    EXIT
 }MsgType;
 
 typedef struct _DataHead
@@ -35,6 +43,12 @@ typedef struct _EventData
     char data[2048];
 }EventData;
 
+typedef struct _WorkerData
+{
+    DataHead info;
+    char *data;
+}WorkerData;
+
 typedef struct _MsgBuff{
     long mtype;//消息类型
     char data[sizeof(EventData)];//数据
@@ -52,6 +66,7 @@ private:
     ReactorThread *m_Threads;			//子线程数组
     map<int, event*> m_SignalEvents;	//自定义的信号处理
     map<int, Conn *> m_ConnMap;           //放置fd对应的conn
+    map<int, int> m_FdPipeIdMap;           //子进程用的存fd对thread管道入口pipefd
     pthread_mutex_t m_Lock;               //connmap操作需要加线程互斥锁
     zval* m_ServerObject;                 //对应的php类 好蛋疼啊 指针存来存去
 
@@ -102,7 +117,6 @@ private:
     }
 
     ServerCbFunc OnReceive;
-//    void (*OnReceive)(zval,int,int,char *);
     ServerCbFunc OnConnect;
     ServerCbFunc OnClose;
 
@@ -114,7 +128,15 @@ private:
     int ReceiveMsgQueue(MsgBuff &buff);
 protected:
     //新建连接成功后，会调用该函数
-    void ConnectionEvent(Conn *conn) { if(OnConnect){ OnConnect(conn);} }
+    void ConnectionEvent(Conn *conn) {
+        if(OnConnect){
+            ServerCbParam param;
+            param.object = conn->GetThread()->tcpConnect->GetServerObject();
+            param.from_id = (uint32_t)conn->GetThread()->tid;
+            param.fd = conn->GetFd();
+            OnConnect(&param);
+        }
+    }
 
     //读取完数据后，会调用该函数
     void ReadEvent(Conn *conn) {
@@ -139,7 +161,15 @@ protected:
     void WriteEvent(Conn *conn) {  }
 
     //断开连接（客户自动断开或异常断开）后，会调用该函数
-    void CloseEvent(Conn *conn, short events) { if(OnClose) { OnClose(conn);} }
+    void CloseEvent(Conn *conn, short events) {
+        if(OnClose) {
+            ServerCbParam param;
+            param.object = conn->GetThread()->tcpConnect->GetServerObject();
+            param.from_id = (uint32_t)conn->GetThread()->tid;
+            param.fd = conn->GetFd();
+            OnClose(&param);
+        }
+    }
 
     //发生致命错误（如果创建子线程失败等）后，会调用该函数
     //该函数的默认操作是输出错误提示，终止程序
