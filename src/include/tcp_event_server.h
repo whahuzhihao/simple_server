@@ -39,7 +39,8 @@ typedef struct _DataHead
 typedef struct _EventData
 {
     DataHead info;
-    char data[2048];
+    //mac系统有限制 不能太大
+    char data[1024];
 }EventData;
 
 
@@ -115,7 +116,7 @@ private:
     bool BeforeRun();
     void WorkerProcessing();
 
-    int SendMsgQueue(const EventData* str, int len, long type);
+    int SendMsgQueue(const EventData* str, long type);
     int ReceiveMsgQueue(MsgBuff &buff);
 protected:
     //新建连接成功后，会调用该函数
@@ -123,7 +124,7 @@ protected:
         if(OnConnect){
             ServerCbParam param;
             param.object = conn->GetThread()->tcpConnect->GetServerObject();
-            param.from_id = (uint32_t)conn->GetThread()->tid;
+            param.from_id = (uint32_t)(size_t)conn->GetThread()->tid;
             param.fd = conn->GetFd();
             OnConnect(&param);
         }
@@ -136,15 +137,14 @@ protected:
         //构造消息
         DataHead head;
         head.fd = conn->GetFd();
-        head.from_id = (uint32_t)conn->GetThread()->tid;
+        head.from_id = (uint32_t)(size_t)conn->GetThread()->tid;
         head.pipefd = conn->GetThread()->notifySendFd;
         head.type = SENDTOWORKER;
 //        printf("send %u %d %d\n",head.from_id, head.pipefd, head.type);
         EventData data;
         data.info = head;
         memcpy(data.data, buf, len+1);
-
-        SendMsgQueue(&data, sizeof(data), m_MasterPid);
+        SendMsgQueue(&data, m_MasterPid);
         efree(buf);
     }
 
@@ -156,7 +156,7 @@ protected:
         if(OnClose) {
             ServerCbParam param;
             param.object = conn->GetThread()->tcpConnect->GetServerObject();
-            param.from_id = (uint32_t)conn->GetThread()->tid;
+            param.from_id = (uint32_t)(size_t)conn->GetThread()->tid;
             param.fd = conn->GetFd();
             OnClose(&param);
         }

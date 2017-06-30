@@ -8,7 +8,6 @@ TcpEventServer::TcpEventServer(int port, int tcount, int wcount) {
     m_Port = port;
     m_MasterPid = getpid();
     m_MainBase = new ReactorThread;
-//    m_Threads = new ReactorThread[m_ThreadCount];
     m_MainBase->tid = pthread_self();
     m_MainBase->base = event_base_new();
 
@@ -80,9 +79,10 @@ void TcpEventServer::InitThread(ReactorThread* me){
 void *TcpEventServer::WorkerLibevent(void *arg) {
     //开启libevent的事件循环，准备处理业务
     ReactorThread *me = (ReactorThread *) arg;
-    printf("thread %u started\n", (unsigned int)me->tid);
+    printf("thread %u started\n", (unsigned int)(size_t)me->tid);
     event_base_dispatch(me->base);
     printf("subthread done\n");
+    return (void *)8;
 }
 
 const char* i2s(int i)
@@ -104,15 +104,19 @@ int TcpEventServer::InitProcessPool(){
     return 0;
 }
 
-int TcpEventServer::SendMsgQueue(const EventData* str, int len, long mtype){
+int TcpEventServer::SendMsgQueue(const EventData* str, long mtype){
     MsgBuff msgbuff;
-    memcpy(msgbuff.data, str, len);
+    memset(&msgbuff, 0, sizeof msgbuff);
+    memcpy(msgbuff.data, str, sizeof(EventData));
     msgbuff.mtype = mtype;
-    return msgsnd(m_MsgId,  &msgbuff,  sizeof(msgbuff.data),  IPC_NOWAIT);
+    int res =  msgsnd(m_MsgId,  &msgbuff,  sizeof(msgbuff.data),  IPC_NOWAIT);
+//    if(res == -1){
+//        printf("errorno:%s\n", strerror(errno));
+//    }
 }
-int TcpEventServer::ReceiveMsgQueue(MsgBuff &msgbuf){
-    memset(msgbuf.data,  '\0',  sizeof(msgbuf.data));
-    return msgrcv(m_MsgId,  &msgbuf,  sizeof(msgbuf.data), msgbuf.mtype,  0);
+int TcpEventServer::ReceiveMsgQueue(MsgBuff &msgbuff){
+    memset(msgbuff.data,  '\0',  sizeof(msgbuff.data));
+    return msgrcv(m_MsgId,  &msgbuff,  sizeof(msgbuff.data), msgbuff.mtype,  0);
 }
 
 void TcpEventServer::WorkerProcessing(){
@@ -120,19 +124,20 @@ void TcpEventServer::WorkerProcessing(){
     MsgBuff msgbuf;
     msgbuf.mtype = m_MasterPid;
     while(1){
-        int ret = ReceiveMsgQueue(msgbuf);
-        EventData *data = (EventData *)&(msgbuf.data);
-//        printf("receive from reactor:%d |%d| %d| %u| %s",data->info.fd,data->info.type, data->info.pipefd,(unsigned int)data->info.from_id,data->data);
-        if(data->info.type == SENDTOWORKER){
-            m_FdPipeIdMap[data->info.fd] = data->info.pipefd;
-            if(OnReceive){
-                zval *object = (m_Threads[0].tcpConnect->GetServerObject());
-                ServerCbParam param;
-                param.from_id = data->info.from_id;
-                param.data = data->data;
-                param.fd = data->info.fd;
-                param.object = object;
-                OnReceive(&param);
+        if(-1 != ReceiveMsgQueue(msgbuf)){
+            EventData *data = (EventData *)&(msgbuf.data);
+//            printf("receive from reactor:%d |%d| %d| %u| %s",data->info.fd,data->info.type, data->info.pipefd,(unsigned int)data->info.from_id,data->data);
+            if(data->info.type == SENDTOWORKER){
+                m_FdPipeIdMap[data->info.fd] = data->info.pipefd;
+                if(OnReceive){
+                    zval *object = (m_Threads[0].tcpConnect->GetServerObject());
+                    ServerCbParam param;
+                    param.from_id = data->info.from_id;
+                    param.data = data->data;
+                    param.fd = data->info.fd;
+                    param.object = object;
+                    OnReceive(&param);
+                }
             }
         }
     }
@@ -144,7 +149,7 @@ bool TcpEventServer::BeforeRun(){
     printf("masterPid:%d\n",m_MasterPid);
     key_t key = ftok(i2s(m_MasterPid), 'a');
     //创建主进程跟子进程通信的消息队列
-    m_MsgId = msgget(key,  IPC_CREAT|0777);
+    m_MsgId = msgget(key,  IPC_CREAT|0666);
     printf("msgQueueId:%d\n",m_MsgId);
 
     //分配pipe 这里在fork子进程之前进行
@@ -188,7 +193,7 @@ bool TcpEventServer::StartRun() {
 
     //开启各个子线程
     for (int i = 0; i < m_ThreadCount; i++) {
-        pthread_create(&m_Threads[i].tid, NULL,
+        pthread_create(&(m_Threads[i].tid), NULL,
                        WorkerLibevent, (void *) &m_Threads[i]);
     }
 
@@ -200,6 +205,7 @@ bool TcpEventServer::StartRun() {
         //printf("free listen\n");
         evconnlistener_free(listener);
     }
+    return true;
 }
 
 void TcpEventServer::StopRun(timeval *tv) {
