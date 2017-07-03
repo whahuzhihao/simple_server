@@ -126,10 +126,14 @@ PHP_METHOD(simple_server, __destruct);
 PHP_METHOD(simple_server, start);
 PHP_METHOD(simple_server, on);
 PHP_METHOD(simple_server, send);
+PHP_METHOD(simple_server, addTimer);
+PHP_METHOD(simple_server, delTimer);
 
 static void simple_server_onreceive(ServerCbParam *param);
 static void simple_server_onconnect(ServerCbParam *param);
 static void simple_server_onclose(ServerCbParam *param);
+static void simple_server_onstart(ServerCbParam *param);
+static void simpler_server_add_timer(int id, short events, void *data);
 
 //----//
 

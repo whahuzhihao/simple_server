@@ -15,6 +15,15 @@ typedef struct _ServerCbParam{
     char *data;
 }ServerCbParam;
 
+typedef struct _TimerData{
+    zval *cb;
+    zval *object;
+    zval *param;
+    event* ev;
+    int persist;
+    timeval* val;
+}TimerData;
+
 typedef void(*ServerCbFunc)(ServerCbParam *param);
 
 typedef enum _MsgType{
@@ -61,6 +70,8 @@ private:
     map<int, event*> m_SignalEvents;	//自定义的信号处理
     map<int, Conn *> m_ConnMap;           //放置fd对应的conn
     map<int, int> m_FdPipeIdMap;           //子进程用的存fd对thread管道入口pipefd
+    map<int, TimerData*> m_TimerDataMap; //存定时器数据结构
+    int m_TimerIndex = 0;
     pthread_mutex_t m_Lock;               //connmap操作需要加线程互斥锁
     zval* m_ServerObject;                 //对应的php类 好蛋疼啊 指针存来存去
 
@@ -111,6 +122,7 @@ private:
     ServerCbFunc OnReceive;
     ServerCbFunc OnConnect;
     ServerCbFunc OnClose;
+    ServerCbFunc OnStart;
 
     int InitProcessPool();
     bool BeforeRun();
@@ -198,9 +210,10 @@ public:
 
 //    添加和删除定时事件
 //    ptr为要回调的函数，tv是间隔时间，once决定是否只执行一次
-    event *AddTimerEvent(void(*ptr)(int, short, void*),
-                         timeval tv, bool once);
-    bool DeleteTimerEvent(event *ev);
+    int AddTimerEvent(void(*ptr)(int, short, void*),
+                         timeval tv, zval* cb, zval* param, bool once);
+//    bool DeleteTimerEvent(event *ev);
+    bool DeleteTimerEvent(int td);
 
     bool On(const char* name, ServerCbFunc cb);
 };

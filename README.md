@@ -26,7 +26,30 @@ $s->on("receive", function($serv,$fd,$td, $data){
     }
 });
 
+$s->on("start", function($serv){
+    echo "start\n";
+    $param = array(1,2);
+    /**
+    * 每1.5秒执行一次
+    * 只执行一次设为false
+    * 回调函数
+    * 回调函数入参
+    * return 定时器id
+    */
+    //暂时只支持在onStart回调中添加和删除定时器
+    $td = $serv->addTimer(1.5, false, function($serv, &$param) use($td){
+        var_dump($param);
+        $param[0]++;
+        if($param[0] == 5){
+            $serv->delTimer($td);
+        }
+    }, $param);
+});
+
 $s->start();
+
+
+
 ```
 
 ```php

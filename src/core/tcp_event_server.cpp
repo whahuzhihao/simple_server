@@ -40,6 +40,9 @@ bool TcpEventServer::On(const char* name, ServerCbFunc func) {
     }else if(strcasecmp(name, "Connect") == 0){
         OnConnect = func;
         return true;
+    }else if(strcasecmp(name, "Start") == 0){
+        OnStart = func;
+        return true;
     }
     return false;
 }
@@ -197,6 +200,14 @@ bool TcpEventServer::StartRun() {
                        WorkerLibevent, (void *) &m_Threads[i]);
     }
 
+    if(m_IfMaster == true){
+        if(OnStart){
+            ServerCbParam param;
+            param.object = GetServerObject();
+            OnStart(&param);
+        }
+    }
+
     //开启主线程的事件循环
     event_base_dispatch(m_MainBase->base);
 
@@ -220,6 +231,14 @@ void TcpEventServer::StopRun(timeval *tv) {
         write(m_Threads[i].notifySendFd, &data, sizeof(data));
     }
     event_base_loopexit(m_MainBase->base, tv);
+    map<int,TimerData*>::iterator iter;
+    for(iter=m_TimerDataMap.begin(); iter!=m_TimerDataMap.end(); iter++)
+    {
+        efree(iter->second->cb);
+        efree(iter->second->param);
+        efree(iter->second);
+    }
+    m_TimerDataMap.clear();
 }
 
 void TcpEventServer::ListenerEventCb(struct evconnlistener *listener,
@@ -359,23 +378,42 @@ bool TcpEventServer::DeleteSignalEvent(int sig) {
     return true;
 }
 
-event *TcpEventServer::AddTimerEvent(void (*ptr)(int, short, void *),
-                                     timeval tv, bool once) {
+int TcpEventServer::AddTimerEvent(void (*ptr)(int, short, void *),
+                                     timeval tv, zval* cb, zval* param,bool once) {
     int flag = 0;
-    if (!once)
+    if (!once){}
         flag = EV_PERSIST;
 
     //新建定时器信号事件
     event *ev = new event;
-    event_assign(ev, m_MainBase->base, -1, flag, ptr, (void *) this);
-    if (event_add(ev, &tv) < 0) {
-        event_del(ev);
-        return NULL;
+    TimerData *timedata = (TimerData*)emalloc(sizeof(TimerData));
+    timedata->cb = cb;
+    timedata->object = GetServerObject();
+    timedata->ev = ev;
+    timedata->param = param;
+    timedata->val = &tv;
+    event_assign(ev, m_MainBase->base, -1, flag, ptr,  timedata);
+
+    if (evtimer_add(ev, &tv) < 0) {
+        evtimer_del(ev);
+        return -1;
     }
-    return ev;
+    m_TimerDataMap[m_TimerIndex] = timedata;
+    return m_TimerIndex++;
 }
 
-bool TcpEventServer::DeleteTimerEvent(event *ev) {
-    int res = event_del(ev);
-    return (0 == res);
+//bool TcpEventServer::DeleteTimerEvent(event *ev) {
+//    int res = event_del(ev);
+//    return (0 == res);
+//}
+
+bool TcpEventServer::DeleteTimerEvent(int td) {
+    if(m_TimerDataMap.find(td) != m_TimerDataMap.end()){
+        event* ev = m_TimerDataMap[td]->ev;
+        m_TimerDataMap[td]->persist = -1;
+        int res = event_del(ev);
+        m_TimerDataMap.erase(td);
+        return (0 == res);
+    }
+    return false;
 }

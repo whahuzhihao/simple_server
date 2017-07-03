@@ -26,12 +26,26 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_simple_server_send, 0, 0, 2)
 ZEND_END_ARG_INFO()
 
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_simple_server_add_timer, 0, 0, 4)
+                ZEND_ARG_INFO(0, time)
+                ZEND_ARG_INFO(0, once)
+                ZEND_ARG_INFO(0, callback)
+                ZEND_ARG_INFO(0, param)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_simple_server_del_timer, 0, 0, 1)
+                ZEND_ARG_INFO(0, td)
+ZEND_END_ARG_INFO()
+
+
 static zend_function_entry simple_server_methods[] = {
         PHP_ME(simple_server, __construct, arginfo_simple_server__construct, ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
         PHP_ME(simple_server, __destruct, arginfo_simple_void, ZEND_ACC_PUBLIC | ZEND_ACC_DTOR)
         PHP_ME(simple_server, start, arginfo_simple_void, ZEND_ACC_PUBLIC)
         PHP_ME(simple_server, on, arginfo_simple_server_on, ZEND_ACC_PUBLIC)
         PHP_ME(simple_server, send, arginfo_simple_server_send, ZEND_ACC_PUBLIC)
+        PHP_ME(simple_server, addTimer, arginfo_simple_server_add_timer, ZEND_ACC_PUBLIC)
+        PHP_ME(simple_server, delTimer, arginfo_simple_server_del_timer, ZEND_ACC_PUBLIC)
         PHP_FE_END
 };
 
@@ -106,9 +120,61 @@ PHP_METHOD(simple_server, on)
     }else if(strcasecmp(name, "close") == 0) {
         zend_update_property(simple_server_class_entry_ptr, getThis(), ZEND_STRL("onClose"), cb TSRMLS_CC);
         tcpEventServer->On("close", simple_server_onclose);
+    }else if(strcasecmp(name, "start") == 0) {
+        zend_update_property(simple_server_class_entry_ptr, getThis(), ZEND_STRL("onStart"), cb TSRMLS_CC);
+        tcpEventServer->On("start", simple_server_onstart);
     }else{
         return;
     }
+}
+
+PHP_METHOD(simple_server, addTimer)
+{
+    zval* server_object = getThis();
+    TcpEventServer *tcpEventServer = (TcpEventServer *)server_get_object(server_object);
+
+    zval *ztime = NULL;
+    zval *zcb = NULL;
+    zval *zonce = NULL;
+    zval *zparam = NULL;
+
+    if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS()TSRMLS_CC, "zzzz", &ztime,&zonce,&zcb,&zparam))
+    {
+        return;
+    }
+
+    if (check_callable(zcb TSRMLS_CC) < 0)
+    {
+        return ;
+    }
+    convert_to_string(ztime);
+    convert_to_boolean(zonce);
+
+    bool once = Z_BVAL_P(zonce);
+    char* timev = Z_STRVAL_P(ztime);
+    int s = 0,m = 0;
+    sscanf(timev, "%d.%d", &s, &m);
+    timeval tvv = {1, 0};
+    zval_add_ref(&zcb);
+    zval_add_ref(&zparam);
+    int res = tcpEventServer->AddTimerEvent(simpler_server_add_timer, tvv , zcb, zparam, false);
+    RETURN_LONG(res);
+}
+
+PHP_METHOD(simple_server, delTimer)
+{
+    zval* server_object = getThis();
+    TcpEventServer *tcpEventServer = (TcpEventServer *)server_get_object(server_object);
+
+    zval *ztd = NULL;
+    if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS()TSRMLS_CC, "z", &ztd))
+    {
+        return;
+    }
+    convert_to_long(ztd);
+    int td = Z_LVAL_P(ztd);
+    bool res = tcpEventServer->DeleteTimerEvent(td);
+    RETURN_BOOL(res);
 }
 
 PHP_METHOD(simple_server, send)
@@ -164,6 +230,26 @@ static void simple_server_onreceive(ServerCbParam *param){
     zval_ptr_dtor(&zfd);
     zval_ptr_dtor(&zfrom_id);
     zval_ptr_dtor(&zdata);
+    if (retval)
+    {
+        zval_ptr_dtor(&retval);
+    }
+}
+
+static void simple_server_onstart(ServerCbParam *param){
+    zval **args[1];
+    zval *server_object = param->object;
+    args[0] = &server_object;
+    zval *retval = NULL;
+    zval *cb = zend_read_property(simple_server_class_entry_ptr, server_object, ZEND_STRL("onStart"), 0 TSRMLS_CC);
+    if (call_user_function_ex(EG(function_table), NULL, cb, &retval, 1, args, 0, NULL TSRMLS_CC) == FAILURE)
+    {
+
+    }
+    if (EG(exception))
+    {
+        zend_exception_error(EG(exception), E_ERROR TSRMLS_CC);
+    }
     if (retval)
     {
         zval_ptr_dtor(&retval);
@@ -234,6 +320,28 @@ static void simple_server_onconnect(ServerCbParam *param){
 }
 
 
+static void simpler_server_add_timer(int id, short events, void *data){
+    TimerData *param = (TimerData*) data;
+
+    zval **args[2];
+    args[0] = &(param->object);
+    args[1] = &(param->param);
+    zval *retval = NULL;
+    if (call_user_function_ex(EG(function_table), NULL, param->cb, &retval, 2, args, 0, NULL TSRMLS_CC) == FAILURE)
+    {
+
+    }
+    if (EG(exception))
+    {
+        zend_exception_error(EG(exception), E_ERROR TSRMLS_CC);
+    }
+    if (retval)
+    {
+        zval_ptr_dtor(&retval);
+    }
+}
+
+
 void simple_server_init(int module_number TSRMLS_DC)
 {
     INIT_CLASS_ENTRY(simple_server_ce, "simple_server", simple_server_methods);
@@ -242,7 +350,8 @@ void simple_server_init(int module_number TSRMLS_DC)
     zend_declare_property_long(simple_server_class_entry_ptr,ZEND_STRL("threadNum"),2,ZEND_ACC_PUBLIC TSRMLS_CC);
     zend_declare_property_long(simple_server_class_entry_ptr,ZEND_STRL("workerNum"),2,ZEND_ACC_PUBLIC TSRMLS_CC);
 
-    zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onReceive"),ZEND_ACC_PUBLIC TSRMLS_CC);
-    zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onClose"),ZEND_ACC_PUBLIC TSRMLS_CC);
-    zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onConnect"),ZEND_ACC_PUBLIC TSRMLS_CC);
+    zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onReceive"),ZEND_ACC_PRIVATE TSRMLS_CC);
+    zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onClose"),ZEND_ACC_PRIVATE TSRMLS_CC);
+    zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onConnect"),ZEND_ACC_PRIVATE TSRMLS_CC);
+    zend_declare_property_null(simple_server_class_entry_ptr,ZEND_STRL("onStart"),ZEND_ACC_PRIVATE TSRMLS_CC);
 }
